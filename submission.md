@@ -69,3 +69,13 @@ The route layer is intentionally thin: routes validate request shape and format 
 **The root cause:** The rating workflow was missing the notification side effect entirely. This was architectural rather than a typo: one interaction path followed the notification pattern, while the rating path never called `create_notification()` after saving the rating.
 
 **Your fix and side-effect check:** I added a `create_notification()` call after the rating commit when the rater is not the song's original sharer. The notification test verifies the sharer receives a `song_rated` notification. The existing rating code still validates score bounds, updates an existing rating instead of violating the unique constraint, and avoids notifying users about their own songs.
+
+## Issue 3: The Same Song Keeps Showing Up Twice in Search
+
+**How I reproduced it:** I ran the existing search tests, including `tests/test_search.py::test_search_no_duplicates_multi_tag_song`, which creates a song with three tags and searches by title. In this local environment the test already passed because SQLAlchemy returned unique `Song` model objects, so I could not reproduce a failing duplicate with the installed dependency versions. I still used that multi-tag setup as the reproduction condition described by the issue.
+
+**How I found the root cause:** I traced `GET /songs/search` in `routes/songs.py` to `services.search_service.search_songs()`. The query performs an outer join from `Song` to `song_tags`. A song with multiple tag rows can produce multiple SQL rows for the same song, which is the condition named in the issue hints.
+
+**The root cause:** The search query joined through the many-to-many tag table without explicitly deduplicating songs. Depending on how the query results are materialized, each matching tag row can create another copy of the same song in the result set.
+
+**Your fix and side-effect check:** I added `.distinct()` to the search query so the database result set is explicitly unique by the selected song columns. I reran the search tests to confirm normal title/artist matches still work, no-match searches still return an empty list, and multi-tag songs are returned once.
