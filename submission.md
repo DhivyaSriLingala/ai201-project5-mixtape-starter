@@ -40,3 +40,12 @@ The route layer is intentionally thin: routes validate request shape and format 
 
 **Your fix and side-effect check:** I removed the Sunday exclusion so every `days_since_last == 1` case increments the streak. I checked the related streak behaviors with the streak tests: first listen still starts at 1, same-day listens still do not double count, skipped days still reset, and Sunday now increments correctly.
 
+## Issue 5: The Last Song in a Playlist Never Shows Up
+
+**How I reproduced it:** I ran the existing pytest suite and confirmed `tests/test_playlists.py::test_playlist_returns_all_songs` and `tests/test_playlists.py::test_playlist_returns_songs_in_order` failed. The fixture created a five-song playlist, but `get_playlist_songs()` returned only four songs: tracks 1 through 4.
+
+**How I found the root cause:** I traced `GET /playlists/<playlist_id>/songs` in `routes/playlists.py` to `services.playlist_service.get_playlist_songs()`. The SQL query ordered songs by `playlist_entries.position`, which matched the expected data flow, so I looked at the return value after the query. The final list comprehension used `songs[:-1]`, which made the cause clear.
+
+**The root cause:** Python list slicing with `[:-1]` returns every element except the last one. The database query returned the complete playlist, but the service discarded the final song during serialization.
+
+**Your fix and side-effect check:** I changed the return statement to serialize every song in `songs`. I reran the playlist tests to check that a populated playlist returns all songs in order and that an empty playlist still returns an empty list.
