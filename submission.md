@@ -59,3 +59,13 @@ The route layer is intentionally thin: routes validate request shape and format 
 **The root cause:** `RECENT_THRESHOLD` was set to 24 hours. That made the "Listening Now" feed a "listened sometime today or yesterday" feed, so old events still looked current as long as they were less than a day old.
 
 **Your fix and side-effect check:** I changed the threshold to 30 minutes, matching the seed data's recent-listening comments and the meaning of a "now" feed. The regression test verifies a 10-minute event remains visible while a 2-hour event is excluded. I also reran the full test suite after later fixes to check related feed and service behavior together.
+
+## Issue 4: I Got Notified When a Friend Added My Song to a Playlist but Not When They Rated It
+
+**How I reproduced it:** I wrote `tests/test_notifications.py::test_rating_someone_elses_song_notifies_original_sharer`. The test creates a song shared by one user, has a different user rate it, then looks for a `song_rated` notification for the original sharer. Before the fix, the rating existed but the notification query found no row.
+
+**How I found the root cause:** I compared the working `notification_service.add_to_playlist()` path with `notification_service.rate_song()`. `add_to_playlist()` validates the actor and target, performs the main action, then calls `create_notification()` when the actor is not the original sharer. `rate_song()` performed the validation and saved the rating, but stopped there.
+
+**The root cause:** The rating workflow was missing the notification side effect entirely. This was architectural rather than a typo: one interaction path followed the notification pattern, while the rating path never called `create_notification()` after saving the rating.
+
+**Your fix and side-effect check:** I added a `create_notification()` call after the rating commit when the rater is not the song's original sharer. The notification test verifies the sharer receives a `song_rated` notification. The existing rating code still validates score bounds, updates an existing rating instead of violating the unique constraint, and avoids notifying users about their own songs.
