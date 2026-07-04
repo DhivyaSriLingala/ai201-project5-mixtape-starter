@@ -49,3 +49,13 @@ The route layer is intentionally thin: routes validate request shape and format 
 **The root cause:** Python list slicing with `[:-1]` returns every element except the last one. The database query returned the complete playlist, but the service discarded the final song during serialization.
 
 **Your fix and side-effect check:** I changed the return statement to serialize every song in `songs`. I reran the playlist tests to check that a populated playlist returns all songs in order and that an empty playlist still returns an empty list.
+
+## Issue 2: Friends Listening Now Shows People From Yesterday
+
+**How I reproduced it:** I wrote `tests/test_feed.py::test_listening_now_excludes_old_friend_events` with a fixed current time. One friend had listened 10 minutes ago and another had listened 2 hours ago. Before the fix, both friends appeared in `get_friends_listening_now()`, proving the feed included stale activity.
+
+**How I found the root cause:** I traced `GET /feed/<user_id>/listening-now` in `routes/feed.py` to `services.feed_service.get_friends_listening_now()`. The function computed a cutoff using `RECENT_THRESHOLD`, then filtered listening events by `listened_at >= cutoff`. The query and friend filtering were correct; the suspicious value was the constant itself.
+
+**The root cause:** `RECENT_THRESHOLD` was set to 24 hours. That made the "Listening Now" feed a "listened sometime today or yesterday" feed, so old events still looked current as long as they were less than a day old.
+
+**Your fix and side-effect check:** I changed the threshold to 30 minutes, matching the seed data's recent-listening comments and the meaning of a "now" feed. The regression test verifies a 10-minute event remains visible while a 2-hour event is excluded. I also reran the full test suite after later fixes to check related feed and service behavior together.
